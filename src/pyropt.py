@@ -9,21 +9,15 @@ class Uncertain(parameter.Parameter):
     next_id = 0
 
     def __init__(self, mid=0, width=0, lbs=None, ubs=None):
-        self._mid = mid
+        self._mid = mid if isinstance(mid, np.ndarray) else np.array([mid])
         self._width = width
-        self._shape = (1,)
+        self._shape = self._mid.shape
         self._lbs = []
         self._ubs = []
 
-        if isinstance(mid, np.ndarray):
-            self._shape = mid.shape
-            if self._shape[0] > 1:
-                #assert self._shape == width.shape, "argument 'mid' shape must be the same as 'width' shape"
-                self._lbs = self._mid - self._width/2.0
-                self._ubs = self._mid + self._width/2.0
-        elif isinstance(mid, int) or isinstance(mid, float):
-            self._lbs = [self._mid - self._width/2.0]
-            self._ubs = [self._mid + self._width/2.0]
+        if isinstance(self._mid, np.ndarray):
+            self._lbs = self._mid - self._width/2.0
+            self._ubs = self._mid + self._width/2.0
         else:
             assert False, "invalid parameters"
 
@@ -52,55 +46,84 @@ class RobustProblem:
         self.rc_constraints = []
         obj_constr = []
 
+        # If objective function contains uncertain parameters replace it
+        # with new variable t, and add constraint f(x) <= t.
         if any([isinstance(c,Uncertain) for c in objective.args[0].args]):
+            print("transforming objective:", objective)
+            
+            import pdb; pdb.set_trace()
+
             t = cp.Variable(name="t")
             if len(objective.args[0].args) > 1:
                 cx, d = objective.args[0].args
-                obj_constr = [cx - t <= -d]
+                obj_constr = (cx - t <= -d)
+
+                xs = obj_constr.variables()
+                x = xs[0]
+                N = x.size
+
+                # TODO
+
             else:
                 obj_constr = [objective.args[0] - t <= 0]
+                
             self.rc_variables += [t]
             self.rc_objective = type(objective)(t)
-            self.rc_constraints += obj_constr
         else:
+            # Otherwise, leave the original objective function.
             self.rc_objective = objective
 
-        #self.make_certain(constraints)
-        for constr in constraints + obj_constr:
+        for constr in constraints:
+            xs = constr.variables()
+            x = xs[0]
+            N = x.size
+
+            lhs, rhs = constr.args[0], constr.args[1]
+
+            #import pdb; pdb.set_trace()
+
             if RobustProblem.is_uncertain(constr):
-                print("transforming uncertain constraint:", constr)
-                lhs, rhs = constr.args[0], constr.args[1]
-                xs = constr.variables()
-                x = xs[0]
-                N = x.shape[0]
+                for i in range(rhs.size):
+                    if RobustProblem.is_uncertain(lhs):
+                        row_a = lhs.args[0]._mid[i]
+                    else:
+                        row_a = lhs.args[0].value[i]
 
-                import pdb; pdb.set_trace()
+                    if RobustProblem.is_uncertain(rhs):
+                        row_b = rhs._mid[i]
+                    else:
+                        row_b = rhs.value[i]
 
-                for i in range(lhs.shape[0]):
-                    lhs_params = lhs.parameters()
-                    a0 = []
-                    if len(lhs_params) > 0:
-                        a0 = lhs_params[0]._mid[i]
-                        ah = lhs_params[0]._ubs[i] - a0
-                    
-                    rhs_params = rhs.parameters()
-                    b0 = []
-                    if len(rhs_params) > 0:
-                        b0 = rhs_params[0]._mid[i]
-                        bh = rhs_params[0]._ubs[i] - b0
-                    
-                    us = [cp.Variable() for _ in range(N+1)]
-                    
-                    assert N == len(a0), "dimensions error"
+                    if RobustProblem.is_uncertain(lhs) and sum(lhs.args[0]._width[i]) > 0.0:
+                        print("transforming uncertain row:", row_a, row_b)
 
-                    for j in range(N):
-                        mask = np.zeros(N)
-                        mask[j] = 1
-                        a1 = ah * mask
-                        self.rc_constraints += [-us[j] <= a1 @ x, a1 @ x <= us[j]]
+                        ah = lhs.args[0]._ubs[i] - row_a
+                        A0 = row_a * np.eye(N)
+                        A_hat = ah * np.eye(N)
+                        us = cp.Variable(N)
+                        self.rc_constraints += [-us <= A_hat @ x, A_hat @ x <= us]
+                        self.rc_variables += [us]
+                        join_constr = A0 @ x + sum(us)
+                        
+                        rhs_params = rhs.parameters()
+                        b0 = 0
+                        if len(rhs_params) > 0:
+                            bh = rhs_params[0]._ubs[i] - b0
+                            ub = cp.Variable()                        
+                            self.rc_variables += [ub]
+                            self.rc_constraints += [-ub <= -bh, -bh <= ub]
+                            join_constr = join_constr + ub
+                        else:
+                            b0 = rhs.value[i]
 
-                    self.rc_constraints += [us[j+1] >= bh, bh >= -us[j+1]]
-                    self.rc_constraints += [a0@x + sum(us) <= b0]
+                        self.rc_constraints += [join_constr <= b0]
+
+                    elif RobustProblem.is_uncertain(rhs) and rhs._width[i] > 0.0:
+                        print("TODO!"); exit()
+                    else:
+                        print("the row has no uncertain variables:", row_a, row_b)
+                        A0 = row_a * np.eye(N)
+                        self.rc_constraints += [A0 @ x <= row_b]
 
             else:
                 print("skipping certain constraint:", constr)
@@ -136,7 +159,7 @@ class RobustProblem:
     
     @property
     def value(self):
-        return self.problem._value
+        return self.rc_problem._value
 
     def solve(self):
         self.rc_problem.solve()
