@@ -18,7 +18,6 @@ x = cp.Variable(4, nonneg=True)
 objective = c @ x
 constraints = [A @ x <= b]
 problem = cp.Problem(cp.Minimize(objective), constraints)
-import pdb; pdb.set_trace()
 
 #problem.solve(solver=cp.CPLEX)     # solve via LP
 problem.solve()                     # solve via convex programming
@@ -29,7 +28,7 @@ print("x=", problem.variables()[0].value)
 # Opt = −8819.658; 
 # RawI = 0, RawII = 438.789, DrugI = 17.552, DrugII = 0
 
-Au = Uncertain(mid = A, width=np.array([[5e-5, 4e-4, 0, 0],
+Au = Uncertain(mid = A, width=np.array([[5e-5 * 2.0, 4e-4 * 2.0, 0, 0],
                                         [0, 0, 0, 0],
                                         [0, 0, 0, 0],
                                         [0, 0, 0, 0],
@@ -43,6 +42,8 @@ data = rob.rc_problem.get_problem_data(cp.SCS)
 import pdb; pdb.set_trace()
 
 rob.solve()
+print("\nThe robust optimal value is", rob.rc_problem.value)
+print("x=", rob.rc_problem.variables()[0].value)
 
 # Expected:
 # RobOpt = −8294.567; 

@@ -103,7 +103,7 @@ class RobustProblem:
                         us = cp.Variable(N)
                         self.rc_constraints += [-us <= A_hat @ x, A_hat @ x <= us]
                         self.rc_variables += [us]
-                        join_constr = A0 @ x + sum(us)
+                        join_constr = row_a @ x + sum(us)
                         
                         rhs_params = rhs.parameters()
                         b0 = 0
@@ -122,8 +122,7 @@ class RobustProblem:
                         print("TODO!"); exit()
                     else:
                         print("the row has no uncertain variables:", row_a, row_b)
-                        A0 = row_a * np.eye(N)
-                        self.rc_constraints += [A0 @ x <= row_b]
+                        self.rc_constraints += [row_a @ x <= row_b]
 
             else:
                 print("skipping certain constraint:", constr)
@@ -162,5 +161,5 @@ class RobustProblem:
         return self.rc_problem._value
 
     def solve(self):
-        self.rc_problem.solve()
+        self.rc_problem.solve(solver=cp.CPLEX)
         
