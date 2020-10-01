@@ -37,13 +37,12 @@ uncertain_constraints = [Au @ x <= b]
 
 rob = RobustProblem(cp.Minimize(objective), uncertain_constraints)
 
-data = rob.rc_problem.get_problem_data(cp.SCS)
-
-import pdb; pdb.set_trace()
+# data = rob.rc_problem.get_problem_data(cp.SCS)
+# import pdb; pdb.set_trace()
 
 rob.solve()
-print("\nThe robust optimal value is", rob.rc_problem.value)
-print("x=", rob.rc_problem.variables()[0].value)
+print("\nThe robust optimal value is", rob.value)
+print("x=", x.value)
 
 # Expected:
 # RobOpt = −8294.567; 

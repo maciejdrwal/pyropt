@@ -35,97 +35,97 @@ class RobustProblem:
 
     def __init__(self, objective, constraints):
         
-        #import pdb; pdb.set_trace()
-
         assert objective.args[0].is_affine(), "Unsupported type of objective function."
         assert all([c.expr.is_affine() for c in constraints]), "Unsupported type of constraints."
 
-        self.orig_variables = objective.variables()     # original problem's variables
-        self.orig_constraints = constraints
-        self.rc_variables = objective.variables()       # Robust Counterpart variables
         self.rc_constraints = []
-        obj_constr = []
+        self.rc_objective = objective
+        self.rc_variables = objective.variables()
 
+        tmp_constraints = constraints.copy()
+        
         # If objective function contains uncertain parameters replace it
         # with new variable t, and add constraint f(x) <= t.
-        if any([isinstance(c,Uncertain) for c in objective.args[0].args]):
+        # Otherwise, keep the original objective function.
+        
+        if RobustProblem.is_uncertain(objective):
             print("transforming objective:", objective)
-            
-            import pdb; pdb.set_trace()
 
-            t = cp.Variable(name="t")
-            if len(objective.args[0].args) > 1:
-                cx, d = objective.args[0].args
-                obj_constr = (cx - t <= -d)
-
-                xs = obj_constr.variables()
-                x = xs[0]
-                N = x.size
-
-                # TODO
-
-            else:
-                obj_constr = [objective.args[0] - t <= 0]
-                
-            self.rc_variables += [t]
+            # set the objective to: min/max t
+            x = objective.variables()[0]
+            #x._shape = (x.size + 1,)
+            #c0 = np.zeros(x.size)
+            #c0[-1] = 1.0
+            #self.rc_objective = type(objective)(c0 @ x)
+            t = cp.Variable()
             self.rc_objective = type(objective)(t)
-        else:
-            # Otherwise, leave the original objective function.
-            self.rc_objective = objective
 
-        for constr in constraints:
+            d = objective.constants()
+            if len(d) > 0: d = -d[0].value
+            else: d = 0.0
+
+            # add new constraint: c @ x - t <= -d
+            cu = objective.parameters()[0]
+            #new_mid = np.append(cu._mid, -1.0)
+            #new_width = np.append(cu._width, 0.0)
+            #new_cu = Uncertain(mid=new_mid, width=new_width)
+            #tmp_constraints += [ new_cu @ x <= d]
+            tmp_constraints += [ cu @ x - t <= d]
+
+        for constr in tmp_constraints:
             xs = constr.variables()
             x = xs[0]
+            t = xs[1] if len(xs) > 1 else None
             N = x.size
 
             lhs, rhs = constr.args[0], constr.args[1]
-
-            #import pdb; pdb.set_trace()
-
+            
             if RobustProblem.is_uncertain(constr):
+                print("transforming uncertain row:", constr)
+
+                is_matrix = lhs.ndim > 0
                 for i in range(rhs.size):
                     if RobustProblem.is_uncertain(lhs):
-                        row_a = lhs.args[0]._mid[i]
+                        params = lhs.parameters()[0]
+                        row_a = params._mid[i] if is_matrix else params._mid
                     else:
-                        row_a = lhs.args[0].value[i]
+                        consts = lhs.constants()[0]
+                        row_a = consts.value[i] if is_matrix else consts.value 
 
                     if RobustProblem.is_uncertain(rhs):
-                        row_b = rhs._mid[i]
+                        row_b = rhs._mid[i] if is_matrix else rhs._mid 
                     else:
-                        row_b = rhs.value[i]
+                        row_b = rhs.value[i] if is_matrix else rhs.value
 
-                    if RobustProblem.is_uncertain(lhs) and sum(lhs.args[0]._width[i]) > 0.0:
-                        print("transforming uncertain row:", row_a, row_b)
+                    join_constr = row_a @ x 
+                    if t is not None: join_constr = row_a @ x - t
 
-                        ah = lhs.args[0]._ubs[i] - row_a
-                        A0 = row_a * np.eye(N)
-                        A_hat = ah * np.eye(N)
-                        us = cp.Variable(N)
-                        self.rc_constraints += [-us <= A_hat @ x, A_hat @ x <= us]
-                        self.rc_variables += [us]
-                        join_constr = row_a @ x + sum(us)
-                        
-                        rhs_params = rhs.parameters()
-                        b0 = 0
-                        if len(rhs_params) > 0:
-                            bh = rhs_params[0]._ubs[i] - b0
+                    if RobustProblem.is_uncertain(lhs):
+                        params = lhs.parameters()[0]
+                        uncertainty = sum(params._width[i]) if is_matrix else sum(params._width)
+                        if uncertainty > 0.0:
+                            ubs = params._ubs[i] if is_matrix else params._ubs
+                            ah = ubs - row_a
+                            A0 = row_a * np.eye(N)
+                            A_hat = ah * np.eye(N)
+                            us = cp.Variable(N)
+                            self.rc_constraints += [-us <= A_hat @ x, A_hat @ x <= us]
+                            join_constr = join_constr + sum(us)
+                                            
+                    if RobustProblem.is_uncertain(rhs):
+                        uncertainty = rhs._width[i] if is_matrix else rhs._width
+                        if uncertainty > 0.0:
+                            rhs_params = rhs.parameters()[0]
+                            ubs = rhs_params._ubs[i] if is_matrix else rhs_params._ubs
+                            bh =  - row_b
                             ub = cp.Variable()                        
-                            self.rc_variables += [ub]
                             self.rc_constraints += [-ub <= -bh, -bh <= ub]
                             join_constr = join_constr + ub
-                        else:
-                            b0 = rhs.value[i]
 
-                        self.rc_constraints += [join_constr <= b0]
-
-                    elif RobustProblem.is_uncertain(rhs) and rhs._width[i] > 0.0:
-                        print("TODO!"); exit()
-                    else:
-                        print("the row has no uncertain variables:", row_a, row_b)
-                        self.rc_constraints += [row_a @ x <= row_b]
-
+                    self.rc_constraints += [join_constr <= row_b]
+                    
             else:
-                print("skipping certain constraint:", constr)
+                print("skipping certain constraint:", constr)                
                 self.rc_constraints += [constr]
 
         self.rc_problem = cp.Problem(self.rc_objective, self.rc_constraints)
@@ -138,7 +138,6 @@ class RobustProblem:
             es = expr
         else:
             es = expr.args
-
         return any([RobustProblem.is_uncertain(child) for child in es])
 
     def make_certain(self, expr):
@@ -160,6 +159,6 @@ class RobustProblem:
     def value(self):
         return self.rc_problem._value
 
-    def solve(self):
-        self.rc_problem.solve(solver=cp.CPLEX)
+    def solve(self, solver=None):
+        self.rc_problem.solve(solver=solver)
         
