@@ -1,40 +1,27 @@
 import numpy as np
 import cvxpy as cp
-import cvxpy.expressions.constants.parameter as parameter
-import cvxpy.expressions.constants.constant as constant
-import cvxpy.expressions.leaf as leaf
 
-class Uncertain(parameter.Parameter):
-    
-    next_id = 0
+from pyropt.uncertain import Uncertain
 
-    def __init__(self, mid=0, width=0, lbs=None, ubs=None):
-        self._mid = mid if isinstance(mid, np.ndarray) else np.array([mid])
-        self._width = width
-        self._shape = self._mid.shape
-        self._lbs = []
-        self._ubs = []
+# Supported problems for RobustLinearProblem:
+#
+#   min c @ x + d
+#    x
+# 
+#   s.t.
+#        A @ x <= b
+#
+# 1) only 1 vector of real-valued variables
+# 2) linear objective function f(x) = c @ x + d, where c,d can be Uncertain or Constant
+# 3) any number of linear constraints A @ x <= b, where A,b can be Uncertain or Constant, 
+#    A can be either matrix or row vector
 
-        if isinstance(self._mid, np.ndarray):
-            self._lbs = self._mid - self._width/2.0
-            self._ubs = self._mid + self._width/2.0
-        else:
-            assert False, "invalid parameters"
-
-        self._name = "uvar" + str(Uncertain.next_id)
-        Uncertain.next_id += 1
-
-        super(Uncertain, self).__init__(self._shape, self._name)
-
-    def __repr__(self):
-        s = "Uncertain(LB=" + str(self._lbs) + ",UB=" + str(self._ubs) + ")"
-        return s
-
-    
-class RobustProblem:
+class RobustLinearProblem:
 
     def __init__(self, objective, constraints):
         
+        assert len(objective.variables()) == 1, "Problem must have 1 group of variables"
+        assert all([len(c.variables())==1 for c in constraints]), "Problem must have 1 group of variables"
         assert objective.args[0].is_affine(), "Unsupported type of objective function."
         assert all([c.expr.is_affine() for c in constraints]), "Unsupported type of constraints."
 
@@ -48,15 +35,16 @@ class RobustProblem:
         # with new variable t, and add constraint f(x) <= t.
         # Otherwise, keep the original objective function.
         
-        if RobustProblem.is_uncertain(objective):
+        if RobustLinearProblem.is_uncertain(objective):
             print("transforming objective:", objective)
+            
+            # t = cp.Variable()
+            # self.rc_objective = type(objective)(t)
+            # obj_expr = objective.args[0]
+            # tmp_constraints += [ obj_expr - t <= 0 ]
 
             # set the objective to: min/max t
             x = objective.variables()[0]
-            #x._shape = (x.size + 1,)
-            #c0 = np.zeros(x.size)
-            #c0[-1] = 1.0
-            #self.rc_objective = type(objective)(c0 @ x)
             t = cp.Variable()
             self.rc_objective = type(objective)(t)
 
@@ -66,10 +54,6 @@ class RobustProblem:
 
             # add new constraint: c @ x - t <= -d
             cu = objective.parameters()[0]
-            #new_mid = np.append(cu._mid, -1.0)
-            #new_width = np.append(cu._width, 0.0)
-            #new_cu = Uncertain(mid=new_mid, width=new_width)
-            #tmp_constraints += [ new_cu @ x <= d]
             tmp_constraints += [ cu @ x - t <= d]
 
         for constr in tmp_constraints:
@@ -77,22 +61,23 @@ class RobustProblem:
             x = xs[0]
             t = xs[1] if len(xs) > 1 else None
             N = x.size
-
-            lhs, rhs = constr.args[0], constr.args[1]
             
-            if RobustProblem.is_uncertain(constr):
+            if RobustLinearProblem.is_uncertain(constr):
                 print("transforming uncertain row:", constr)
+
+                lhs, rhs = constr.args[0], constr.args[1]
+                #import pdb; pdb.set_trace()
 
                 is_matrix = lhs.ndim > 0
                 for i in range(rhs.size):
-                    if RobustProblem.is_uncertain(lhs):
+                    if RobustLinearProblem.is_uncertain(lhs):
                         params = lhs.parameters()[0]
                         row_a = params._mid[i] if is_matrix else params._mid
                     else:
                         consts = lhs.constants()[0]
                         row_a = consts.value[i] if is_matrix else consts.value 
 
-                    if RobustProblem.is_uncertain(rhs):
+                    if RobustLinearProblem.is_uncertain(rhs):
                         row_b = rhs._mid[i] if is_matrix else rhs._mid 
                     else:
                         row_b = rhs.value[i] if is_matrix else rhs.value
@@ -100,7 +85,7 @@ class RobustProblem:
                     join_constr = row_a @ x 
                     if t is not None: join_constr = row_a @ x - t
 
-                    if RobustProblem.is_uncertain(lhs):
+                    if RobustLinearProblem.is_uncertain(lhs):
                         params = lhs.parameters()[0]
                         uncertainty = sum(params._width[i]) if is_matrix else sum(params._width)
                         if uncertainty > 0.0:
@@ -112,7 +97,7 @@ class RobustProblem:
                             self.rc_constraints += [-us <= A_hat @ x, A_hat @ x <= us]
                             join_constr = join_constr + sum(us)
                                             
-                    if RobustProblem.is_uncertain(rhs):
+                    if RobustLinearProblem.is_uncertain(rhs):
                         uncertainty = rhs._width[i] if is_matrix else rhs._width
                         if uncertainty > 0.0:
                             rhs_params = rhs.parameters()[0]
@@ -138,7 +123,7 @@ class RobustProblem:
             es = expr
         else:
             es = expr.args
-        return any([RobustProblem.is_uncertain(child) for child in es])
+        return any([RobustLinearProblem.is_uncertain(child) for child in es])
 
     def make_certain(self, expr):
         if isinstance(expr, Uncertain):
@@ -150,15 +135,10 @@ class RobustProblem:
         else:
             for child in expr.args:
                 self.make_certain(child)
-
-    def get_variables(self):
-        all_vars = [v.value for v in self.variables]
-        return all_vars
     
     @property
     def value(self):
         return self.rc_problem._value
 
     def solve(self, solver=None):
-        self.rc_problem.solve(solver=solver)
-        
+        self.rc_problem.solve(verbose=True)

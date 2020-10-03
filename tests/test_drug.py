@@ -1,6 +1,7 @@
+from context import pyropt as ro
+
 import numpy as np
 import cvxpy as cp
-from pyropt import Uncertain, RobustProblem
 
 c = np.array([100.0, 199.9, -5500.0, -6100.0])
 
@@ -28,14 +29,14 @@ print("x=", problem.variables()[0].value)
 # Opt = −8819.658; 
 # RawI = 0, RawII = 438.789, DrugI = 17.552, DrugII = 0
 
-Au = Uncertain(mid = A, width=np.array([[5e-5 * 2.0, 4e-4 * 2.0, 0, 0],
+Au = ro.Uncertain(mid = A, width=np.array([[5e-5 * 2.0, 4e-4 * 2.0, 0, 0],
                                         [0, 0, 0, 0],
                                         [0, 0, 0, 0],
                                         [0, 0, 0, 0],
                                         [0, 0, 0, 0]]))
 uncertain_constraints = [Au @ x <= b]
 
-rob = RobustProblem(cp.Minimize(objective), uncertain_constraints)
+rob = ro.RobustLinearProblem(cp.Minimize(objective), uncertain_constraints)
 
 # data = rob.rc_problem.get_problem_data(cp.SCS)
 # import pdb; pdb.set_trace()
