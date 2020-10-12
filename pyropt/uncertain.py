@@ -1,13 +1,17 @@
 import numpy as np
 import cvxpy.expressions.constants.parameter as parameter
 
+INTERVAL = "interval"
+ELLIPSOID = "ellipsoid"
+
 class Uncertain(parameter.Parameter):
     
     next_id = 0
 
-    def __init__(self, mid=0, width=0, lbs=None, ubs=None):
+    def __init__(self, mid=0, width=0, lbs=None, ubs=None, typ=INTERVAL):
+        self._typ = typ
         self._mid = mid if isinstance(mid, np.ndarray) else np.array([mid])
-        self._width = width
+        self._width = width if isinstance(width, np.ndarray) else np.array([width])
         self._shape = self._mid.shape
         self._lbs = []
         self._ubs = []
@@ -24,5 +28,7 @@ class Uncertain(parameter.Parameter):
         super(Uncertain, self).__init__(self._shape, self._name)
 
     def __repr__(self):
-        s = "Uncertain(LB=" + str(self._lbs) + ",UB=" + str(self._ubs) + ")"
+        s = "Uncertain(None)"
+        if self._typ == INTERVAL:
+            s = "Uncertain(LB=" + str(self._lbs) + ",UB=" + str(self._ubs) + ")"
         return s

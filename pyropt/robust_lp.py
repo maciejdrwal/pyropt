@@ -124,17 +124,6 @@ class RobustLinearProblem:
         else:
             es = expr.args
         return any([RobustLinearProblem.is_uncertain(child) for child in es])
-
-    def make_certain(self, expr):
-        if isinstance(expr, Uncertain):
-            expr.value = expr._ubs[0]
-            return
-        if isinstance(expr, list):
-            for child in expr:
-                self.make_certain(child)
-        else:
-            for child in expr.args:
-                self.make_certain(child)
     
     @property
     def value(self):
