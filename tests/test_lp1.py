@@ -31,4 +31,3 @@ print("x=", x.value)
 
 # data = rob.rc_problem.get_problem_data(cp.SCS)
 # import pdb; pdb.set_trace()
-

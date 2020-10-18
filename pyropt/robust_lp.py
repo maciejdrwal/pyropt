@@ -35,7 +35,7 @@ class RobustLinearProblem:
         # with new variable t, and add constraint f(x) <= t.
         # Otherwise, keep the original objective function.
         
-        if RobustLinearProblem.is_uncertain(objective):
+        if Uncertain.is_uncertain(objective):
             print("transforming objective:", objective)
             
             # t = cp.Variable()
@@ -62,7 +62,7 @@ class RobustLinearProblem:
             t = xs[1] if len(xs) > 1 else None
             N = x.size
             
-            if RobustLinearProblem.is_uncertain(constr):
+            if Uncertain.is_uncertain(constr):
                 print("transforming uncertain row:", constr)
 
                 lhs, rhs = constr.args[0], constr.args[1]
@@ -70,14 +70,14 @@ class RobustLinearProblem:
 
                 is_matrix = lhs.ndim > 0
                 for i in range(rhs.size):
-                    if RobustLinearProblem.is_uncertain(lhs):
+                    if Uncertain.is_uncertain(lhs):
                         params = lhs.parameters()[0]
                         row_a = params._mid[i] if is_matrix else params._mid
                     else:
                         consts = lhs.constants()[0]
                         row_a = consts.value[i] if is_matrix else consts.value 
 
-                    if RobustLinearProblem.is_uncertain(rhs):
+                    if Uncertain.is_uncertain(rhs):
                         row_b = rhs._mid[i] if is_matrix else rhs._mid 
                     else:
                         row_b = rhs.value[i] if is_matrix else rhs.value
@@ -85,7 +85,7 @@ class RobustLinearProblem:
                     join_constr = row_a @ x 
                     if t is not None: join_constr = row_a @ x - t
 
-                    if RobustLinearProblem.is_uncertain(lhs):
+                    if Uncertain.is_uncertain(lhs):
                         params = lhs.parameters()[0]
                         uncertainty = sum(params._width[i]) if is_matrix else sum(params._width)
                         if uncertainty > 0.0:
@@ -97,7 +97,7 @@ class RobustLinearProblem:
                             self.rc_constraints += [-us <= A_hat @ x, A_hat @ x <= us]
                             join_constr = join_constr + sum(us)
                                             
-                    if RobustLinearProblem.is_uncertain(rhs):
+                    if Uncertain.is_uncertain(rhs):
                         uncertainty = rhs._width[i] if is_matrix else rhs._width
                         if uncertainty > 0.0:
                             rhs_params = rhs.parameters()[0]
@@ -115,16 +115,6 @@ class RobustLinearProblem:
 
         self.rc_problem = cp.Problem(self.rc_objective, self.rc_constraints)
 
-    @staticmethod
-    def is_uncertain(expr):
-        if isinstance(expr, Uncertain):
-            return True        
-        if isinstance(expr, list):
-            es = expr
-        else:
-            es = expr.args
-        return any([RobustLinearProblem.is_uncertain(child) for child in es])
-    
     @property
     def value(self):
         return self.rc_problem._value
